@@ -46,6 +46,24 @@ func (p *Pool) Add(closer io.Closer) {
 	p.mu.Unlock()
 }
 
+// Move transfers ownership of the pooled [io.Closer] instances
+// to a new [Pool] and returns it. The source pool is reset to
+// empty, so a deferred [Pool.Close] on it becomes a no-op. The
+// destination pool inherits the LIFO close order.
+//
+// This enables the "armed defer + commit on success" pattern: a
+// caller defers [Pool.Close] for cleanup on the error paths, then
+// calls Move on the success path to hand ownership to the result.
+//
+// This method is concurrency safe.
+func (p *Pool) Move() *Pool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := &Pool{handles: p.handles}
+	p.handles = nil
+	return out
+}
+
 // Close closes all the [io.Closer] inside the pool iterating
 // in backward order. Therefore, if one registers a TCP connection
 // and then the corresponding TLS connection, the TLS connection

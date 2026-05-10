@@ -87,6 +87,52 @@ func TestPool(t *testing.T) {
 		require.Equal(t, errors.Join(expectedErr2, expectedErr1).Error(), err.Error())
 	})
 
+	t.Run("move transfers ownership", func(t *testing.T) {
+		src := &closepool.Pool{}
+		m1 := &mockCloser{}
+		m2 := &mockCloser{}
+
+		src.Add(m1)
+		src.Add(m2)
+
+		dst := src.Move()
+
+		// Closing the source must be a no-op now.
+		require.NoError(t, src.Close())
+		assert.Equal(t, int64(0), m1.closed.Load())
+		assert.Equal(t, int64(0), m2.closed.Load())
+
+		// Destination owns the closers and preserves LIFO order.
+		require.NoError(t, dst.Close())
+		assert.Greater(t, m1.closed.Load(), m2.closed.Load())
+	})
+
+	t.Run("move on empty pool", func(t *testing.T) {
+		src := &closepool.Pool{}
+		dst := src.Move()
+		require.NoError(t, src.Close())
+		require.NoError(t, dst.Close())
+	})
+
+	t.Run("source is reusable after move", func(t *testing.T) {
+		src := &closepool.Pool{}
+		m1 := &mockCloser{}
+		src.Add(m1)
+
+		dst := src.Move()
+
+		// Adding to the source after Move must not affect the destination.
+		m2 := &mockCloser{}
+		src.Add(m2)
+
+		require.NoError(t, dst.Close())
+		assert.Greater(t, m1.closed.Load(), int64(0))
+		assert.Equal(t, int64(0), m2.closed.Load())
+
+		require.NoError(t, src.Close())
+		assert.Greater(t, m2.closed.Load(), int64(0))
+	})
+
 	t.Run("concurrent usage", func(t *testing.T) {
 		pool := closepool.Pool{}
 		done := make(chan struct{})
